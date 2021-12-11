@@ -8,22 +8,53 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Runtime.CompilerServices;
+using Fluent;
 
 namespace NVIDIAShaderBrowser
 {
+   
     public partial class Form1 : Form
     {
-
+        Dictionary<string, ShaderObject> shaderObjects;
         String shaderDir = "%localappdata%\\NVIDIA\\DXCache";
         public Form1()
         {
             InitializeComponent();
+            shaderObjects = new Dictionary<string, ShaderObject>();
+            advancedListView1.GetColumn("Size").AspectToStringConverter = delegate (object y) 
+            {
+                long size = (long)y;
+                return FormatBytes(size, true);
+            };
+            advancedListView1.GetColumn("Delta Change").AspectToStringConverter = delegate (object z)
+            {
+                if (z != null)
+                { 
+                    long size = (long)z;
+                    return FormatBytes(size, true);
+                }
+                return "0";
+            };
+            advancedListView1.GetColumn("Cummulative Delta").AspectToStringConverter = delegate (object z)
+            {
+                if (z != null)
+                {
+                    long size = (long)z;
+                    return FormatBytes(size, true);
+                }
+                return "0";
+            };
+            
+
+
         }
 
         private void Form1_Load(object sender, EventArgs e)
         {
-            doStuff();
+           doStuff();
         }
+       
 
         void doStuff()
         { 
@@ -43,44 +74,55 @@ namespace NVIDIAShaderBrowser
 
             this.totalTextBox1.Text = FormatBytes(binAndTocFiles.ToList().Sum(x => new FileInfo(x).Length), true);
 
-            // SortedDictionary<string, ListViewItem> items = new SortedDictionary<string, ListViewItem>();
-            //listView1.BeginUpdate();
             foreach (KeyValuePair<string, List<string>> entry in files)
             {
                 string processName = getProcessName(entry.Value);
+                string key = entry.Key;
                 if (processName != null)
                 {
-
-
-                    ListViewItem item;
-                    if (listView1.Items.ContainsKey(entry.Key))
+                    ShaderObject item;
+                    if (shaderObjects.ContainsKey(key))
                     {
-                        item = listView1.Items[entry.Key];
-                        //item.SubItems[1].Text = processName;
-                        string newSum = (FormatBytes(entry.Value.Sum(s => new FileInfo(s).Length), true));
-                        if (!item.SubItems[2].Text.Equals(newSum))
-                            item.SubItems[2].Text = newSum;
+                        item = shaderObjects[key];
+
+                        //ring newSum = (FormatBytes(entry.Value.Sum(s => new FileInfo(s).Length), true));
+                        long  newSum = ((entry.Value.Sum(s => new FileInfo(s).Length)));
+                        long newDelta = newSum - item.Size;
+                        if (newDelta != item.Delta)
+                        {
+                            item.Delta = newDelta;
+                            item.TotalDelta += newDelta;
+                        }
+                        if (newSum != item.Size)
+                            item.Size = newSum;
+
                     }
                     else
                     {
-                        item = new ListViewItem();
-                        item.Text = entry.Key;
-                        item.Name = entry.Key;
-                        item.SubItems.Add(processName);
-                        item.SubItems.Add(FormatBytes(entry.Value.Sum(s => new FileInfo(s).Length), true));
-                        listView1.Items.Add(item);
+                        item = new ShaderObject();
+                        item.Uid = key;
+                        item.ProcessName = processName;
+                        item.Size = ((entry.Value.Sum(s => new FileInfo(s).Length)));
+                        item.Delta = item.Size;
+                        //item.TotalDelta += Delta;
+                        shaderObjects.Add(item.Uid, item);
+                        advancedListView1.AddObject(item);
                     }
+                    
                 }
             }
 
-            List<ListViewItem> itemsToRemove = new List<ListViewItem>();
-            foreach(ListViewItem i in listView1.Items)
+            //advancedListView1.SetObjects(shaderObjects.Values);
+
+            //List<ShaderObjectListViewItem> itemsToRemove = new List<ListViewItem>();
+            foreach (ShaderObject i in shaderObjects.Values.ToArray())
             {
-                if (!files.ContainsKey(i.Text))
-                    itemsToRemove.Add(i);
+                if (!files.ContainsKey(i.Uid))
+                {
+                    shaderObjects.Remove(i.Uid);
+                    advancedListView1.RemoveObject(i);
+                }
             }
-            itemsToRemove.ToList().ForEach(x => listView1.Items.Remove(x));
-            //listView1.EndUpdate();
 
         }
 
@@ -143,9 +185,19 @@ namespace NVIDIAShaderBrowser
                 tocFs.Seek(80, SeekOrigin.Begin);
                 byte[] processNameB = new byte[255];
                 tocFs.Read(processNameB, 0, processNameB.Length);
-                return System.Text.Encoding.UTF8.GetString(processNameB, 0, processNameB.Length);
+                processNameB = TrimTailingZeros(processNameB);
+                string s =  System.Text.Encoding.UTF8.GetString(processNameB, 0, processNameB.Length).Trim();
+                return s;
             }
             return null;
+        }
+
+        // https://stackoverflow.com/a/58717282/2499697
+        public static byte[] TrimTailingZeros(byte[] arr)
+        {
+            if (arr == null || arr.Length == 0)
+                return arr;
+            return arr.Reverse().SkipWhile(x => x == 0).Reverse().ToArray();
         }
 
         private void refreshButton_Click(object sender, EventArgs e)
@@ -202,6 +254,69 @@ namespace NVIDIAShaderBrowser
                 }
             });
 
+        }
+
+        private void buttonResetTotals_Click(object sender, EventArgs e)
+        {
+            this.shaderObjects.Values.ToList().ForEach(x => x.TotalDelta = 0);
+        }
+    }
+
+    public class ShaderObject : INotifyPropertyChanged
+    {
+        public event PropertyChangedEventHandler PropertyChanged;
+        private string uid;
+        private string processName;
+        private long size;
+        private long delta;
+        private long totalDelta;
+
+
+        public string Uid
+        {
+            get { return uid;  }
+            set { this.uid = value;  }
+        }
+        public string ProcessName
+        {
+            get { return processName; }
+            set { this.processName = value;  }
+
+        }
+
+        public long Size
+        {
+            get { return size;  }
+            set
+            {
+                size = value;
+                OnPropertyChanged();
+            }
+        }
+        public long Delta
+        {
+            get { return delta; }
+            set
+            {
+                delta = value;
+                OnPropertyChanged();
+            }
+        }
+        public long TotalDelta
+        {
+            get { return totalDelta; }
+            set
+            {
+                totalDelta = value;
+                OnPropertyChanged();
+            }
+        }
+
+        // Create the OnPropertyChanged method to raise the event
+        // The calling member's name will be used as the parameter.
+        protected void OnPropertyChanged([CallerMemberName] string name = null)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
     }
 }
