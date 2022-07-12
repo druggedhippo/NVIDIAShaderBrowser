@@ -181,8 +181,16 @@ namespace NVIDIAShaderBrowser
             FileStream tocFs = File.OpenRead(file);
             if (tocFs.ReadByte() == 0x44 && tocFs.ReadByte() == 0x58 && tocFs.ReadByte() == 0x44 && tocFs.ReadByte() == 0x43)
             {
+                tocFs.Seek(0x08, SeekOrigin.Begin);
+                int seekPos = 80;
+                /** if the header has this byte, the name seems to start at a different place */
+                if (tocFs.ReadByte() == 0x55)
+                {
+                    seekPos = 72;
+                }
 
-                tocFs.Seek(80, SeekOrigin.Begin);
+
+                tocFs.Seek(seekPos, SeekOrigin.Begin);
                 byte[] processNameB = new byte[255];
                 tocFs.Read(processNameB, 0, processNameB.Length);
                 processNameB = TrimTailingZeros(processNameB);
